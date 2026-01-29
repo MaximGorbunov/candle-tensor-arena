@@ -1,0 +1,25 @@
+[package]
+name = "candle-tensor-arena"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+half = "2.7.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+candle-core = { version = "0.9.2", features = ["cuda"] }
+float8 = "0.6.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = "0.3.2"
+candle-metal-kernels = "0.9.2"
+candle-core = { version = "0.9.2", features = ["metal"] }
+
+[profile.release]
+opt-level = 3        
+codegen-units = 1    # Disables parallel code generation, allowing more inter-procedural optimizations
+lto = "fat"          # Enables "fat" Link-Time Optimization
+panic = "abort"      # Changes panic strategy to abort, potentially reducing binary size and improving performance
+debug = false        # Excludes debug symbols, reducing binary size (optional, for final release)
+strip = "symbols"    # Strips symbols from the final binary, further reducing size
+
