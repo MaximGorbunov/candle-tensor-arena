@@ -28,4 +28,16 @@ impl Arena {
     pub fn reset(&mut self) {
         self.end_idx = 0;
     }
+
+    pub fn len(&self) -> usize {
+        self.end_idx
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.end_idx == 0
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
 }
