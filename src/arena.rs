@@ -1,12 +1,17 @@
+use std::marker::PhantomData;
+
 use candle_core::{DType, Device, IndexOp, Shape, Tensor};
 
-pub struct Arena {
+use crate::inplace_copy::{InplaceCopy, TensorType};
+
+pub struct Arena<T: TensorType> {
     buffer: Tensor,
     end_idx: usize,
     capacity: usize,
+    _phantom: PhantomData<T>
 }
 
-impl Arena {
+impl <T: TensorType> Arena<T> {
     pub fn new<S: Into<Shape>>(shape: S, size: usize, dtype: DType, device: &Device) -> Result<Self, candle_core::Error> {
         let shape: Shape = shape.into();
         let mut shape = shape.into_dims();
@@ -16,13 +21,16 @@ impl Arena {
             buffer,
             end_idx: 0,
             capacity: size,
+            _phantom: PhantomData
         })
     }
 
-    pub fn alloc(&mut self) -> Tensor {
+    pub fn alloc(&mut self, slice: &[T]) -> Tensor {
         let index = self.end_idx;
         self.end_idx += 1;
-        self.buffer.i(index).unwrap()
+        let tensor = self.buffer.i(index).unwrap();
+        tensor.inplace_copy(slice).expect("failed to inplacy copy to tensor from arena");
+        tensor
     }
 
     pub fn reset(&mut self) {

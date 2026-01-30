@@ -1,5 +1,5 @@
 use candle_core::backend::BackendStorage;
-use candle_core::{CpuStorage, DType, InplaceOp1, Layout, MetalStorage, Tensor};
+use candle_core::{CpuStorage, CudaStorage, DType, InplaceOp1, Layout, MetalStorage, Tensor};
 use half::{bf16, f16};
 use std::ptr;
 
@@ -7,6 +7,7 @@ pub trait TensorType {
     type CpuRepresentation;
     fn matches_cpu_storage(storage: &CpuStorage) -> bool;
     fn matches_metal_storage(storage: &MetalStorage) -> bool;
+    fn matches_cuda_storage(storage: &CudaStorage) -> bool;
 }
 
 impl TensorType for bf16 {
@@ -19,6 +20,10 @@ impl TensorType for bf16 {
     fn matches_metal_storage(storage: &MetalStorage) -> bool {
         matches!(storage.dtype(), DType::BF16)
     }
+
+    fn matches_cuda_storage(storage: &CudaStorage) -> bool {
+        matches!(storage.dtype(), DType::BF16)
+    }
 }
 impl TensorType for f16 {
     type CpuRepresentation = f16;
@@ -28,6 +33,10 @@ impl TensorType for f16 {
     }
 
     fn matches_metal_storage(storage: &MetalStorage) -> bool {
+        matches!(storage.dtype(), DType::F16)
+    }
+
+    fn matches_cuda_storage(storage: &CudaStorage) -> bool {
         matches!(storage.dtype(), DType::F16)
     }
 }
@@ -42,6 +51,10 @@ impl TensorType for f32 {
     fn matches_metal_storage(storage: &MetalStorage) -> bool {
         matches!(storage.dtype(), DType::F32)
     }
+
+    fn matches_cuda_storage(storage: &CudaStorage) -> bool {
+        matches!(storage.dtype(), DType::F32)
+    }
 }
 
 impl TensorType for f64 {
@@ -52,6 +65,10 @@ impl TensorType for f64 {
     }
 
     fn matches_metal_storage(storage: &MetalStorage) -> bool {
+        matches!(storage.dtype(), DType::F64)
+    }
+
+    fn matches_cuda_storage(storage: &CudaStorage) -> bool {
         matches!(storage.dtype(), DType::F64)
     }
 }
@@ -110,13 +127,14 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
         if !T::matches_metal_storage(storage) {
             candle_core::bail!("type mismatch for copy operation");
         }
+        
+        if !layout.is_contiguous() {
+            return Err(candle_core::Error::msg("Contiguous layout required"));
+        }
 
         let elem_count = layout.shape().elem_count();
         if self.slice.len() < elem_count {
             return Err(candle_core::Error::msg("Source slice too small"));
-        }
-        if !layout.is_contiguous() {
-            return Err(candle_core::Error::msg("Contiguous layout required"));
         }
         let byte_len = elem_count * 4; // f32 = 4 bytes
         unsafe {
@@ -130,6 +148,15 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
     #[cfg(target_os = "linux")]
     fn cuda_fwd(&self, storage: &mut CudaStorage, layout: &Layout) -> candle_core::Result<()> {
         use float8::F8E4M3;
+
+        if !T::matches_cuda_storage(storage) {
+            candle_core::bail!("type mismatch for copy operation");
+        }
+        
+        if !layout.is_contiguous() {
+            return Err(candle_core::Error::msg("Contiguous layout required"));
+        }
+
         let device = storage.device().clone();
         match storage.dtype() {
             DType::U8 => unsafe {
