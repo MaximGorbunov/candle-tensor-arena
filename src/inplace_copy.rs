@@ -102,7 +102,7 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
     }
 
     #[cfg(target_os = "linux")]
-    fn cuda_fwd(&self, storage: &mut CudaStorage, layout: &Layout) -> candle_core::Result<()> {
+    fn cuda_fwd(&self, storage: &mut cuda_core::CudaStorage, layout: &Layout) -> candle_core::Result<()> {
         use float8::F8E4M3;
 
         if !T::type_matches(storage.dtype()) {
