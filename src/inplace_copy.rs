@@ -50,6 +50,22 @@ macro_rules! cpu_copy {
         }
 }
 
+#[cfg(target_os = "linux")]
+macro_rules! cuda_copy {
+        ($storage:ident, $device:ident, $start:ident, $end:ident, $slice:expr, [$($primitive:ident, $dtype:ident),*]) => {
+            match $storage {
+                $(
+                CpuStorage::$dtype($storage) => {
+                    let dst_slice = $storage.as_cuda_slice_mut::<$primitive>().unwrap().slice_mut(start..end);
+                    let src_slice = std::mem::transmute::<&[T], &[$primitive]>($slice);
+                    $device.memcpy_htod(src_slice, dst_slice)
+                }
+                )*
+                _ => candle_core::bail!("unsupported dtype for inplace copy"),
+            }
+        }
+}
+
 impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
     fn name(&self) -> &'static str {
         "copy"
@@ -123,58 +139,20 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
         }
 
         let device = storage.device().clone();
-        match storage.dtype() {
-            DType::U8 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<u8>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[u8]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::U32 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<u32>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[u32]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::I16 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<i16>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[i16]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::I32 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<i32>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[i32]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::I64 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<i64>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[i64]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::BF16 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<bf16>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[bf16]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::F16 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<f16>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[f16]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::F32 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<f32>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[f32]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::F64 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<f64>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[f64]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            DType::F8E4M3 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<F8E4M3>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[F8E4M3]>(self.slice);
-                device.memcpy_htod(src_slice, dst_slice)
-            },
-            _ => candle_core::bail!("dtype not supported!"),
+        cuda_copy! {
+            storage, device, start, end, self.slice,
+            [
+                u8, U8,
+                u32, U32,
+                i16, I16,
+                i32, I32,
+                i64, I64,
+                bf16, BF16,
+                F8E4M3, F8E4M3,
+                f16, F16,
+                f32, F32,
+                f64, F64
+            ]
         }
     }
 }
