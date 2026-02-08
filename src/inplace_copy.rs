@@ -105,7 +105,7 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
     }
 
     #[cfg(target_os = "linux")]
-    fn cuda_fwd(&self, storage: &mut cuda_core::CudaStorage, layout: &Layout) -> candle_core::Result<()> {
+    fn cuda_fwd(&self, storage: &mut candle_core::CudaStorage, layout: &Layout) -> candle_core::Result<()> {
         use float8::F8E4M3;
 
         if !T::type_matches(storage.dtype()) {
@@ -135,8 +135,8 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
                 device.memcpy_htod(src_slice, dst_slice)
             },
             DType::I16 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<i32>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[i32]>(self.slice);
+                let dst_slice = storage.as_cuda_slice_mut::<i16>().unwrap();
+                let src_slice = std::mem::transmute::<&[T], &[i16]>(self.slice);
                 device.memcpy_htod(src_slice, dst_slice)
             },
             DType::I32 => unsafe {
@@ -145,8 +145,8 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
                 device.memcpy_htod(src_slice, dst_slice)
             },
             DType::I64 => unsafe {
-                let dst_slice = storage.as_cuda_slice_mut::<i32>().unwrap();
-                let src_slice = std::mem::transmute::<&[T], &[i32]>(self.slice);
+                let dst_slice = storage.as_cuda_slice_mut::<i64>().unwrap();
+                let src_slice = std::mem::transmute::<&[T], &[i64]>(self.slice);
                 device.memcpy_htod(src_slice, dst_slice)
             },
             DType::BF16 => unsafe {
@@ -263,25 +263,25 @@ use candle_core::Device;
     successful_test!(successful_inplace_copy_metal_f8e4m3, F8E4M3, F8E4M3, Device::new_metal(0).unwrap());
 
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_u8, u8, u8, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_u8, u8, U8, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_u32, u32, u32, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_u32, u32, U32, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_i16, i16, i16, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_i16, i16, I16, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_i32, i32, i32, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_i32, i32, I32, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_i64, i64, i64, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_i64, i64, I64, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_bf16, bf16, bf16, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_bf16, bf16, BF16, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_f16, f16, f16, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_f16, f16, F16, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_f32, f32, f32, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_f32, f32, F32, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_f64, f64, f64, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_f64, f64, F64, Device::new_cuda(0).unwrap());
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_f8e4m3, f8e4m3, f8e4m3, device::new_cuda(0).unwrap());
+    successful_test!(successful_inplace_copy_cuda_f8e4m3, F8E4M3, F8E4M3, Device::new_cuda(0).unwrap());
 
     macro_rules! inplace_failure_less_elements {
         ($name: ident, $device: expr) => {
