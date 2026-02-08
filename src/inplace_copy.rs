@@ -34,11 +34,11 @@ struct InplaceCopyOp<'a, T: TensorType> {
 }
 
 macro_rules! cpu_copy {
-        ($storage:ident, $slice:expr, [$($primitive:ident, $dtype:ident),*]) => {
+        ($storage:ident, $start:ident, $end:ident, $slice:expr, [$($primitive:ident, $dtype:ident),*]) => {
             match $storage {
                 $(
                 CpuStorage::$dtype(cpu_storage) => {
-                    let dst: &mut [$primitive] = cpu_storage.as_mut_slice();
+                    let dst: &mut [$primitive] = &mut cpu_storage.as_mut_slice()[$start..$end];
                     unsafe {
                         let src = std::mem::transmute::<&[T], &[$primitive]>($slice);
                         dst.copy_from_slice(src);
@@ -55,12 +55,13 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
         "copy"
     }
 
-    fn cpu_fwd(&self, storage: &mut CpuStorage, _: &Layout) -> candle_core::Result<()> {
+    fn cpu_fwd(&self, storage: &mut CpuStorage, layout: &Layout) -> candle_core::Result<()> {
         if !T::type_matches(storage.dtype()) {
             candle_core::bail!("type mismatch for copy operation");
         }
+        let (start, end) = layout.contiguous_offsets().expect("operation only supports contiguous offsets");
         cpu_copy! {
-            storage, self.slice,
+            storage, start, end, self.slice,
                 [
                     u8, U8,
                     u32, U32,
@@ -84,19 +85,21 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
             candle_core::bail!("type mismatch for copy operation");
         }
 
-        if !layout.is_contiguous() {
-            return Err(candle_core::Error::msg("Contiguous layout required"));
-        }
+        let (start, end) = layout.contiguous_offsets().expect("operation only supports contiguous offsets");
+        let elem_count = end - start;
 
-        let elem_count = layout.shape().elem_count();
         if self.slice.len() < elem_count {
             return Err(candle_core::Error::msg("Source slice too small"));
         }
-        let byte_len = elem_count *  storage.dtype().size_in_bytes();
+        if self.slice.len() > elem_count {
+            return Err(candle_core::Error::msg("Source slice too big"));
+        }
+        let byte_size = elem_count *  storage.dtype().size_in_bytes().min(1);
         unsafe {
             let dst_ptr = storage.buffer().contents() as *mut T;
+            let dst_ptr = dst_ptr.add(start);
             ptr::copy_nonoverlapping(self.slice.as_ptr(), dst_ptr, elem_count);
-            storage.buffer().did_modify_range(NSRange::new(0, byte_len));
+            storage.buffer().did_modify_range(NSRange::new(start * byte_size, elem_count * byte_size));
         }
         Ok(())
     }
@@ -109,8 +112,14 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
             candle_core::bail!("type mismatch for copy operation");
         }
 
-        if !layout.is_contiguous() {
-            return Err(candle_core::Error::msg("Contiguous layout required"));
+        let (start, end) = layout.contiguous_offsets().expect("operation only supports contiguous offsets");
+
+        let elem_count = layout.shape().elem_count();
+        if self.slice.len() < elem_count {
+            return Err(candle_core::Error::msg("Source slice too small"));
+        }
+        if self.slice.len() > elem_count {
+            return Err(candle_core::Error::msg("Source slice too big"));
         }
 
         let device = storage.device().clone();
@@ -182,7 +191,8 @@ impl InplaceCopy for Tensor {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::Device;
+    use candle_core::IndexOp;
+use candle_core::Device;
 
     use super::*;
     macro_rules! successful_test {
@@ -200,8 +210,11 @@ mod tests {
                     .unwrap()
                     .to_vec1::<$ty>()
                     .unwrap();
-                original_tensor
-                    .inplace_copy(data_to_copy.as_slice())
+                original_tensor.i(0).unwrap()
+                    .inplace_copy(&data_to_copy.as_slice()[0..4])
+                    .unwrap();
+                original_tensor.i(1).unwrap()
+                    .inplace_copy(&data_to_copy.as_slice()[4..8])
                     .unwrap();
                 let actual = original_tensor
                     .to_device(&cpu_device)
@@ -270,21 +283,41 @@ mod tests {
     #[cfg(target_os = "linux")]
     successful_test!(successful_inplace_copy_cuda_f8e4m3, f8e4m3, f8e4m3, device::new_cuda(0).unwrap());
 
-    #[test]
-    #[should_panic]
-    fn failure_inplace_copy_cpu_if_less_elements() {
-        let device = Device::Cpu;
-        let original_tensor = Tensor::zeros((2, 4), DType::F32, &device).unwrap();
-        let data_to_copy = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        original_tensor.inplace_copy(&data_to_copy).unwrap();
+    macro_rules! inplace_failure_less_elements {
+        ($name: ident, $device: expr) => {
+            #[test]
+            #[should_panic]
+            fn $name() {      
+                let device = $device;
+                let original_tensor = Tensor::zeros((2, 4), DType::F32, &device).unwrap();
+                let data_to_copy = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+                original_tensor.inplace_copy(&data_to_copy).unwrap();
+            }
+        }
     }
 
-    #[test]
-    #[should_panic]
-    fn failure_inplace_copy_cpu_if_more_elements() {
-        let device = Device::Cpu;
-        let original_tensor = Tensor::zeros((2, 4), DType::F32, &device).unwrap();
-        let data_to_copy = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        original_tensor.inplace_copy(&data_to_copy).unwrap();
+    inplace_failure_less_elements!(failure_inplace_copy_cpu_if_less_elements, Device::Cpu);
+    #[cfg(target_os = "macos")]
+    inplace_failure_less_elements!(failure_inplace_copy_metal_if_less_elements, Device::new_metal(0).unwrap());
+    #[cfg(target_os = "linux")]
+    inplace_failure_less_elements!(failure_inplace_copy_cuda_if_less_elements, Device::new_cuda(0).unwrap());
+
+    macro_rules! inplace_failure_more_elements {
+        ($name: ident, $device: expr) => {
+            #[test]
+            #[should_panic]
+            fn $name() {      
+                let device = $device;
+                let original_tensor = Tensor::zeros((2, 4), DType::F32, &device).unwrap();
+                let data_to_copy = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+                original_tensor.inplace_copy(&data_to_copy).unwrap();
+            }
+        }
     }
+
+    inplace_failure_more_elements!(failure_inplace_copy_cpu_if_more_elements, Device::Cpu);
+    #[cfg(target_os = "macos")]
+    inplace_failure_more_elements!(failure_inplace_copy_metal_if_more_elements, Device::new_metal(0).unwrap());
+    #[cfg(target_os = "linux")]
+    inplace_failure_more_elements!(failure_inplace_copy_cuda_if_more_elements, Device::new_cuda(0).unwrap());
 }
