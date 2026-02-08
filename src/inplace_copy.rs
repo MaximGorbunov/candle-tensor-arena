@@ -53,12 +53,14 @@ macro_rules! cpu_copy {
 #[cfg(target_os = "linux")]
 macro_rules! cuda_copy {
         ($storage:ident, $device:ident, $start:ident, $end:ident, $slice:expr, [$($primitive:ident, $dtype:ident),*]) => {
-            match $storage {
+            match $storage.dtype() {
                 $(
-                CpuStorage::$dtype($storage) => {
-                    let dst_slice = $storage.as_cuda_slice_mut::<$primitive>().unwrap().slice_mut(start..end);
-                    let src_slice = std::mem::transmute::<&[T], &[$primitive]>($slice);
-                    $device.memcpy_htod(src_slice, dst_slice)
+                DType::$dtype => {
+                    unsafe {
+                        let mut dst_slice = $storage.as_cuda_slice_mut::<$primitive>().unwrap().slice_mut($start..$end);
+                        let src_slice = std::mem::transmute::<&[T], &[$primitive]>($slice);
+                        $device.memcpy_htod(src_slice, &mut dst_slice)
+                    }
                 }
                 )*
                 _ => candle_core::bail!("unsupported dtype for inplace copy"),
@@ -170,7 +172,7 @@ impl InplaceCopy for Tensor {
 #[cfg(test)]
 mod tests {
     use candle_core::IndexOp;
-use candle_core::Device;
+    use candle_core::Device;
 
     use super::*;
     macro_rules! successful_test {
@@ -265,7 +267,7 @@ use candle_core::Device;
         ($name: ident, $device: expr) => {
             #[test]
             #[should_panic]
-            fn $name() {      
+            fn $name() {
                 let device = $device;
                 let original_tensor = Tensor::zeros((2, 4), DType::F32, &device).unwrap();
                 let data_to_copy = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -284,7 +286,7 @@ use candle_core::Device;
         ($name: ident, $device: expr) => {
             #[test]
             #[should_panic]
-            fn $name() {      
+            fn $name() {
                 let device = $device;
                 let original_tensor = Tensor::zeros((2, 4), DType::F32, &device).unwrap();
                 let data_to_copy = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
