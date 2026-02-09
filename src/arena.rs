@@ -12,19 +12,26 @@ pub struct Arena<T: TensorType> {
 }
 
 #[derive(Clone, Debug)]
-pub struct AllocationError;
+pub struct AllocationError {
+    message: String,
+}
+
+impl std::fmt::Display for AllocationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "arena allocation failed: {}", self.message)
+    }
+}
 
 impl<T: TensorType> Arena<T> {
     pub fn new<S: Into<Shape>>(
         shape: S,
         size: usize,
-        dtype: DType,
         device: &Device,
     ) -> Result<Self, candle_core::Error> {
         let shape: Shape = shape.into();
         let mut shape = shape.into_dims();
         shape.insert(0, size);
-        let buffer = Tensor::zeros(shape, dtype, device)?;
+        let buffer = Tensor::zeros(shape, T::DTYPE, device)?;
         Ok(Arena {
             buffer,
             end_idx: 0,
@@ -36,13 +43,17 @@ impl<T: TensorType> Arena<T> {
     pub fn alloc(&mut self, slice: &[T]) -> Result<Tensor, AllocationError> {
         let index = self.end_idx;
         if index >= self.capacity {
-            return Err(AllocationError);
+            return Err(AllocationError {
+                message: "capacity exceeded".to_owned(),
+            });
         }
         self.end_idx += 1;
-        let tensor = self.buffer.i(index).unwrap();
-        tensor
-            .inplace_copy(slice)
-            .expect("failed to inplacy copy to tensor from arena");
+        let tensor = self.buffer.i(index).map_err(|_| AllocationError {
+            message: "failed to select index".to_owned(),
+        })?;
+        tensor.inplace_copy(slice).map_err(|_| AllocationError {
+            message: "failed to inplace copy to tensor from arena".to_owned(),
+        })?;
         Ok(tensor)
     }
 
@@ -70,7 +81,7 @@ mod tests {
     #[test]
     fn test_allocation() {
         let device = Device::Cpu;
-        let mut arena = Arena::<f32>::new(1, 100, DType::F32, &device).unwrap();
+        let mut arena = Arena::<f32>::new(1, 100, &device).unwrap();
         for i in 0..100 {
             let t = arena.alloc(&[i as f32]).unwrap();
         }

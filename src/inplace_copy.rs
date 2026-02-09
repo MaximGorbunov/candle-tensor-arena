@@ -6,11 +6,14 @@ use float8::F8E4M3;
 
 pub trait TensorType {
     fn type_matches(dtype: DType) -> bool;
+    const DTYPE: DType;
 }
 
 macro_rules! tensor_type {
     ($ty: ty, $dtype:ident) => {
         impl TensorType for $ty {
+            const DTYPE: DType = DType::$dtype;
+
             fn type_matches(dtype: DType) -> bool {
                 matches!(dtype, DType::$dtype)
             }
@@ -39,9 +42,11 @@ macro_rules! cpu_copy {
                 $(
                 CpuStorage::$dtype(cpu_storage) => {
                     let dst: &mut [$primitive] = &mut cpu_storage.as_mut_slice()[$start..$end];
+                    let src_bytes = $slice.as_ptr() as *const u8;
+                    let dst_bytes = dst.as_ptr() as *mut u8;
+                    let byte_count = std::mem::size_of_val($slice);
                     unsafe {
-                        let src = std::mem::transmute::<&[T], &[$primitive]>($slice);
-                        dst.copy_from_slice(src);
+                        std::ptr::copy_nonoverlapping(src_bytes, dst_bytes, byte_count);
                     }
                 }
                 )*
@@ -68,7 +73,7 @@ macro_rules! cuda_copy {
         }
 }
 
-impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
+impl<T: TensorType> InplaceOp1 for InplaceCopyOp<'_, T> {
     fn name(&self) -> &'static str {
         "copy"
     }
@@ -78,6 +83,10 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
             candle_core::bail!("type mismatch for copy operation");
         }
         let (start, end) = layout.contiguous_offsets().expect("operation only supports contiguous offsets");
+        let elements_count = end - start;
+        if elements_count != self.slice.len() {
+            candle_core::bail!("dst elements count {} doesn't match src elements count {} for inplace copy", elements_count, self.slice.len());
+        }
         cpu_copy! {
             storage, start, end, self.slice,
                 [
@@ -132,7 +141,7 @@ impl<'a, T: TensorType> InplaceOp1 for InplaceCopyOp<'a, T> {
 
         let (start, end) = layout.contiguous_offsets().expect("operation only supports contiguous offsets");
 
-        let elem_count = layout.shape().elem_count();
+        let elem_count = end - start;
         if self.slice.len() < elem_count {
             return Err(candle_core::Error::msg("Source slice too small"));
         }
