@@ -1,8 +1,8 @@
 use candle_core::backend::BackendStorage;
 use candle_core::{CpuStorage, DType, InplaceOp1, Layout, MetalStorage, Tensor};
+use float8::F8E4M3;
 use half::{bf16, f16};
 use std::ptr;
-use float8::F8E4M3;
 
 pub trait TensorType {
     fn type_matches(dtype: DType) -> bool;
@@ -82,10 +82,16 @@ impl<T: TensorType> InplaceOp1 for InplaceCopyOp<'_, T> {
         if !T::type_matches(storage.dtype()) {
             candle_core::bail!("type mismatch for copy operation");
         }
-        let (start, end) = layout.contiguous_offsets().expect("operation only supports contiguous offsets");
+        let (start, end) = layout
+            .contiguous_offsets()
+            .expect("operation only supports contiguous offsets");
         let elements_count = end - start;
         if elements_count != self.slice.len() {
-            candle_core::bail!("dst elements count {} doesn't match src elements count {} for inplace copy", elements_count, self.slice.len());
+            candle_core::bail!(
+                "dst elements count {} doesn't match src elements count {} for inplace copy",
+                elements_count,
+                self.slice.len()
+            );
         }
         cpu_copy! {
             storage, start, end, self.slice,
@@ -112,7 +118,9 @@ impl<T: TensorType> InplaceOp1 for InplaceCopyOp<'_, T> {
             candle_core::bail!("type mismatch for copy operation");
         }
 
-        let (start, end) = layout.contiguous_offsets().expect("operation only supports contiguous offsets");
+        let (start, end) = layout
+            .contiguous_offsets()
+            .expect("operation only supports contiguous offsets");
         let elem_count = end - start;
 
         if self.slice.len() < elem_count {
@@ -121,25 +129,33 @@ impl<T: TensorType> InplaceOp1 for InplaceCopyOp<'_, T> {
         if self.slice.len() > elem_count {
             return Err(candle_core::Error::msg("Source slice too big"));
         }
-        let byte_size = elem_count *  storage.dtype().size_in_bytes().min(1);
+        let byte_size = elem_count * storage.dtype().size_in_bytes().min(1);
         unsafe {
             let dst_ptr = storage.buffer().contents() as *mut T;
             let dst_ptr = dst_ptr.add(start);
             ptr::copy_nonoverlapping(self.slice.as_ptr(), dst_ptr, elem_count);
-            storage.buffer().did_modify_range(NSRange::new(start * byte_size, elem_count * byte_size));
+            storage
+                .buffer()
+                .did_modify_range(NSRange::new(start * byte_size, elem_count * byte_size));
         }
         Ok(())
     }
 
     #[cfg(target_os = "linux")]
-    fn cuda_fwd(&self, storage: &mut candle_core::CudaStorage, layout: &Layout) -> candle_core::Result<()> {
+    fn cuda_fwd(
+        &self,
+        storage: &mut candle_core::CudaStorage,
+        layout: &Layout,
+    ) -> candle_core::Result<()> {
         use float8::F8E4M3;
 
         if !T::type_matches(storage.dtype()) {
             candle_core::bail!("type mismatch for copy operation");
         }
 
-        let (start, end) = layout.contiguous_offsets().expect("operation only supports contiguous offsets");
+        let (start, end) = layout
+            .contiguous_offsets()
+            .expect("operation only supports contiguous offsets");
 
         let elem_count = end - start;
         if self.slice.len() < elem_count {
@@ -180,8 +196,8 @@ impl InplaceCopy for Tensor {
 
 #[cfg(test)]
 mod tests {
-    use candle_core::IndexOp;
     use candle_core::Device;
+    use candle_core::IndexOp;
 
     use super::*;
     macro_rules! successful_test {
@@ -199,10 +215,14 @@ mod tests {
                     .unwrap()
                     .to_vec1::<$ty>()
                     .unwrap();
-                original_tensor.i(0).unwrap()
+                original_tensor
+                    .i(0)
+                    .unwrap()
                     .inplace_copy(&data_to_copy.as_slice()[0..4])
                     .unwrap();
-                original_tensor.i(1).unwrap()
+                original_tensor
+                    .i(1)
+                    .unwrap()
                     .inplace_copy(&data_to_copy.as_slice()[4..8])
                     .unwrap();
                 let actual = original_tensor
@@ -227,50 +247,154 @@ mod tests {
     successful_test!(successful_inplace_copy_cpu_f16, f16, F16, Device::Cpu);
     successful_test!(successful_inplace_copy_cpu_f32, f32, F32, Device::Cpu);
     successful_test!(successful_inplace_copy_cpu_f64, f64, F64, Device::Cpu);
-    successful_test!(successful_inplace_copy_cpu_f8e4m3, F8E4M3, F8E4M3, Device::Cpu);
+    successful_test!(
+        successful_inplace_copy_cpu_f8e4m3,
+        F8E4M3,
+        F8E4M3,
+        Device::Cpu
+    );
 
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_u8,
+        u8,
+        U8,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_u32,
+        u32,
+        U32,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_i16,
+        i16,
+        I16,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_i32,
+        i32,
+        I32,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_i64,
+        i64,
+        I64,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_bf16,
+        bf16,
+        BF16,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_f16,
+        f16,
+        F16,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_f32,
+        f32,
+        F32,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_f64,
+        f64,
+        F64,
+        Device::new_metal(0).unwrap()
+    );
+    #[cfg(target_os = "macos")]
+    successful_test!(
+        successful_inplace_copy_metal_f8e4m3,
+        F8E4M3,
+        F8E4M3,
+        Device::new_metal(0).unwrap()
+    );
 
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_u8, u8, U8, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_u32, u32, U32, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_i16, i16, I16, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_i32, i32, I32, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_i64, i64, I64, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_bf16, bf16, BF16, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_f16, f16, F16, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_f32, f32, F32, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_f64, f64, F64, Device::new_metal(0).unwrap());
-    #[cfg(target_os = "macos")]
-    successful_test!(successful_inplace_copy_metal_f8e4m3, F8E4M3, F8E4M3, Device::new_metal(0).unwrap());
-
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_u8, u8, U8, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_u8,
+        u8,
+        U8,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_u32, u32, U32, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_u32,
+        u32,
+        U32,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_i16, i16, I16, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_i16,
+        i16,
+        I16,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_i32, i32, I32, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_i32,
+        i32,
+        I32,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_i64, i64, I64, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_i64,
+        i64,
+        I64,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_bf16, bf16, BF16, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_bf16,
+        bf16,
+        BF16,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_f16, f16, F16, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_f16,
+        f16,
+        F16,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_f32, f32, F32, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_f32,
+        f32,
+        F32,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_f64, f64, F64, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_f64,
+        f64,
+        F64,
+        Device::new_cuda(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    successful_test!(successful_inplace_copy_cuda_f8e4m3, F8E4M3, F8E4M3, Device::new_cuda(0).unwrap());
+    successful_test!(
+        successful_inplace_copy_cuda_f8e4m3,
+        F8E4M3,
+        F8E4M3,
+        Device::new_cuda(0).unwrap()
+    );
 
     macro_rules! inplace_failure_less_elements {
         ($name: ident, $device: expr) => {
@@ -282,14 +406,20 @@ mod tests {
                 let data_to_copy = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
                 original_tensor.inplace_copy(&data_to_copy).unwrap();
             }
-        }
+        };
     }
 
     inplace_failure_less_elements!(failure_inplace_copy_cpu_if_less_elements, Device::Cpu);
     #[cfg(target_os = "macos")]
-    inplace_failure_less_elements!(failure_inplace_copy_metal_if_less_elements, Device::new_metal(0).unwrap());
+    inplace_failure_less_elements!(
+        failure_inplace_copy_metal_if_less_elements,
+        Device::new_metal(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    inplace_failure_less_elements!(failure_inplace_copy_cuda_if_less_elements, Device::new_cuda(0).unwrap());
+    inplace_failure_less_elements!(
+        failure_inplace_copy_cuda_if_less_elements,
+        Device::new_cuda(0).unwrap()
+    );
 
     macro_rules! inplace_failure_more_elements {
         ($name: ident, $device: expr) => {
@@ -301,12 +431,18 @@ mod tests {
                 let data_to_copy = [0.0_f32, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
                 original_tensor.inplace_copy(&data_to_copy).unwrap();
             }
-        }
+        };
     }
 
     inplace_failure_more_elements!(failure_inplace_copy_cpu_if_more_elements, Device::Cpu);
     #[cfg(target_os = "macos")]
-    inplace_failure_more_elements!(failure_inplace_copy_metal_if_more_elements, Device::new_metal(0).unwrap());
+    inplace_failure_more_elements!(
+        failure_inplace_copy_metal_if_more_elements,
+        Device::new_metal(0).unwrap()
+    );
     #[cfg(target_os = "linux")]
-    inplace_failure_more_elements!(failure_inplace_copy_cuda_if_more_elements, Device::new_cuda(0).unwrap());
+    inplace_failure_more_elements!(
+        failure_inplace_copy_cuda_if_more_elements,
+        Device::new_cuda(0).unwrap()
+    );
 }
